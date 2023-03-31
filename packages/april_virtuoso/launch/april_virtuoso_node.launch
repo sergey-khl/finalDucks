@@ -1,0 +1,7 @@
+<launch>
+  <group ns="$(arg veh)">
+    <node pkg="april_virtuoso" type="april_virtuoso_node.py" name="digit_virtuoso" output="screen">
+      <param name="veh" value="$(arg veh)" />
+    </node>
+  </group>
+</launch>

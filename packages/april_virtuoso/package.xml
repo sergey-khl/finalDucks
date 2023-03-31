@@ -1,0 +1,11 @@
+<package>
+  <name>digit_virtuoso</name>
+  <version>0.1.0</version>
+  <description>
+  finding digits and april tags. Really the heart of the operation.
+  </description>
+  <maintainer email="sergeykhlynovskiy@gmail.com">Sergey Khlynovskiy</maintainer>
+  <license>None</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+</package>
