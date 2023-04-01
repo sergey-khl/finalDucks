@@ -13,21 +13,18 @@ from turbojpeg import TurboJPEG
 from duckietown_msgs.msg import WheelsCmdStamped, Twist2DStamped
 import tf.transformations as tft
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Point
-from duckietown_msgs.srv import ChangePattern
 
 
 # Define the HSV color range for road and stop mask
 ROAD_MASK = [(20, 60, 0), (50, 255, 255)]
 STOP_MASK = [(0, 120, 120), (15, 255, 255)]
-NUM_MASK = [(90, 85, 46), (175, 255, 255)]
 
 # Turn pattern 
-TURNS = ['S', 'S', 'L', 'R', 'S', 'R', 'L'] # starting at apriltag 3
+#TURNS = ['S', 'S', 'L', 'R', 'S', 'R', 'L'] # starting at apriltag 3
 TURN_VALUES = {'S': 0, 'L': np.pi/2, 'R': -np.pi/2}
-TURNS_RADIUS = [0, 0, 0.3, 0.12, 0, 0.12, 0.3]
+#TURNS_RADIUS = [0, 0, 0.3, 0.12, 0, 0.12, 0.3]
+TURN_RADIUS = {"S": 0, "L": 0.3, "R": 0.12}
 STOP_RED = False
-STOP_BLUE = False
 
 # Set debugging mode (change to True to enable)
 DEBUG = False
@@ -50,9 +47,9 @@ class LaneFollowNode(DTROS):
                                     queue_size=1,
                                     buff_size="20MB")
                                     
-        self.sub_done = rospy.Subscriber("/" + self.veh + "/done",
-                                    Bool,
-                                    self.cb_done,
+        self.sub_turn = rospy.Subscriber("/" + self.veh + "/turn",
+                                    String,
+                                    self.cb_turn,
                                     queue_size=1)   
 
         # Initialize distance subscriber and velocity publisher
@@ -63,6 +60,8 @@ class LaneFollowNode(DTROS):
         
         # Initialize TurboJPEG decoder
         self.jpeg = TurboJPEG()
+        
+
         
 
         # PID Variables
@@ -80,6 +79,8 @@ class LaneFollowNode(DTROS):
 
         self.kp_turn = 1
 
+        self.latest_turn = "S"
+
         # number area 
         self.last_num_area = 0
 
@@ -95,17 +96,12 @@ class LaneFollowNode(DTROS):
                                            Odometry, 
                                            self.odom_callback)
 
-        # Initialize LED pattern change service
-        led_service = f'/{self.veh}/led_controller_node/led_pattern'
-        rospy.wait_for_service(led_service)
-        self.led_pattern = rospy.ServiceProxy(led_service, ChangePattern)
-
         # Initialize shutdown hook
         rospy.on_shutdown(self.hook)
 
 
     def color_mask(self, img, mask, crop_width, pid=False, stopping=False, number=False):
-        global STOP_RED, STOP_BLUE
+        global STOP_RED
         # Convert the cropped image to HSV color space
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -158,22 +154,12 @@ class LaneFollowNode(DTROS):
                     else: 
                         self.proportional_stopline = None
 
-                    if cy >= 20:
-                        STOP_BLUE = False
-
                     if cy >= 170 and cx in range(340, 645):
                         STOP_RED = True
 
-                # If checking for number condition or above the threshold, set STOP_BLUE
-                elif number and max_area < 2500:
-                    # print('max_area', max_area)
-
-                    if max_area >= 2100:
-                        # print('cy: ', cy, 'cx: ', cx)
-                        STOP_BLUE = True
 
                 else:
-                    STOP_RED = STOP_BLUE = False
+                    STOP_RED = False
 
                 # Draw the contour and centroid on the image (for debugging)
                 if DEBUG:
@@ -191,8 +177,6 @@ class LaneFollowNode(DTROS):
                 self.proportional_stopline = None
                 STOP_RED = False
 
-            elif number:
-                STOP_BLUE = False
 
 
     def callback(self, msg):
@@ -201,14 +185,12 @@ class LaneFollowNode(DTROS):
         h, w, _ = img.shape
         # Crop the image to focus on the road
         crop_road = img[300:-1, :, :]
-        crop_sign = img[:, 200:w-100, :]
 
         crop_width = crop_road.shape[1]
 
         # Process the image for PID control using the ROAD_MASK
         self.color_mask(crop_road, ROAD_MASK, crop_width, pid=True)
-        # Process the image for number stopping condition using the NUM_MASK
-        self.color_mask(crop_sign, NUM_MASK, crop_width, number=True)
+
         # Process the image for stopping condition using the STOP_MASK
         self.color_mask(crop_road, STOP_MASK, crop_width, stopping=True)
 
@@ -297,48 +279,39 @@ class LaneFollowNode(DTROS):
 
 
     def traverse_town(self):
-        global STOP_RED, STOP_BLUE
+        global STOP_RED
         rate = rospy.Rate(8)  # 8hz
 
-        turn = 0
-
         while not rospy.is_shutdown():
-            turn = turn % len(TURNS)
+            
             
             # Continue driving until a stop sign (red) or a number sign (blue) is detected
-            while not STOP_RED and not STOP_BLUE:
+            while not STOP_RED:
                 self.drive()
                 rate.sleep()
 
+            latest_turn = self.latest_turn
+
             # Stop the Duckiebot once a sign is detected
-            before_stop_red, before_stop_blue = STOP_RED, STOP_BLUE
+            before_stop_red = STOP_RED
             self.move_robust(speed=0 ,seconds=2)
-            STOP_RED, STOP_BLUE = before_stop_red, before_stop_blue
+            STOP_RED = before_stop_red
 
             print('STOP_RED', STOP_RED)
-            print('STOP_BLUE', STOP_BLUE)
-            print(TURNS[turn])
+            print(latest_turn)
 
             # If a stop line is detected
             if STOP_RED:
-                turning_angle = TURN_VALUES[TURNS[turn]]
+                turning_angle = TURN_VALUES[latest_turn]
                 if turning_angle == 0:
                     self.move_robust(speed=0.3 ,seconds=2.5)
-                    turn += 1
                     STOP_RED = False
 
                 else:
-                    self.turn(TURNS_RADIUS[turn], turning_angle)
-                    turn += 1
+                    self.turn(TURN_RADIUS[latest_turn], turning_angle)
+
                     STOP_RED = False
 
-            # If a number sign is detected
-            elif STOP_BLUE:
-                # sleep? wait for number? Sergy? 
-                self.move_robust(speed=0 ,seconds=2)
-                self.lane_follow_n_sec(2)
-                STOP_BLUE = False
-                
 
     def move_robust(self, speed, seconds):
         rate = rospy.Rate(10)
@@ -360,33 +333,14 @@ class LaneFollowNode(DTROS):
             self.drive()
             rate.sleep()
 
-    def cb_done(self, done):
-        if done.data:
-            self.hook()
+    def cb_turn(self, turn):
+        print('latest, ', turn.data)
+        self.latest_turn = turn.data
 
     def hook(self):
         print("SHUTTING DOWN")
         self.move_robust(0, 2)
 
-
-    def change_led_lights(self, dir: str):
-        '''
-        Sends msg to service server
-        ignore
-        Colors:
-            "off": [0,0,0],
-            "white": [1,1,1],
-            "green": [0,1,0],
-            "red": [1,0,0],
-            "blue": [0,0,1],
-            "yellow": [1,0.8,0],
-            "purple": [1,0,1],
-            "cyan": [0,1,1],
-            "pink": [1,0,0.5],
-        '''
-        msg = String()
-        msg.data = dir
-        self.led_pattern(msg)
 
 
 if __name__ == "__main__":

@@ -36,16 +36,9 @@ class AugmentedRealityNode(DTROS):
                        debug=0)
                        
         self.tags = {
-        "153": {"x": 1.75, "y": 1.252, "z": 0.075, "yaw": 0, "pitch": 0, "roll": 4.7124},
-        "201": {"x": 1.65, "y": 0.17, "z": 0.075, "yaw": 3.92699, "pitch": 0, "roll": 4.7124},
-        "200": {"x": 0.17, "y": 0.17, "z": 0.075, "yaw": 2.3562, "pitch": 0, "roll": 4.7124},
-        "162": {"x": 1.253, "y": 1.253, "z": 0.075, "yaw": 4.7124, "pitch": 0, "roll": 4.7124},
-        "58": {"x": 0.574, "y": 1.259, "z": 0.075, "yaw": 4.7124, "pitch": 0, "roll": 4.7124},
-        "133": {"x": 1.253, "y": 1.755, "z": 0.075, "yaw": 3.14159265, "pitch": 0, "roll": 4.7124},
-        "169": {"x": 0.574, "y": 1.755, "z": 0.075, "yaw": 1.5708, "pitch": 0, "roll": 4.7124},
-        "62": {"x": 0.075, "y": 1.755, "z": 0.075, "yaw": 3.141592, "pitch": 0, "roll": 4.7124},
-        "94": {"x": 1.65, "y": 2.84, "z": 0.075, "yaw": 5.49779, "pitch": 0, "roll": 4.7124},
-        "93": {"x": 0.17, "y": 2.84, "z": 0.075, "yaw": 0.7854, "pitch": 0, "roll": 4.7124},
+            "56": "S",
+            "48": "R",
+            "50": "L",
         }
 
         # Initialize TurboJPEG decoder
@@ -73,11 +66,10 @@ class AugmentedRealityNode(DTROS):
     def srvGetApril(self, req):
         undistorted = self.jpeg.decode(req.img.data)
         self.undistorted = cv2.cvtColor(undistorted, cv2.COLOR_BGR2GRAY)
-        resized_image = cv2.resize(self.undistorted, (28, 28))
 
         detected = self.detect_april()
 
-        return imgResponse(Int32(data=detected))
+        return imgResponse(String(data=detected))
 
 
     def detect_april(self):
@@ -85,18 +77,15 @@ class AugmentedRealityNode(DTROS):
         # https://github.com/duckietown/lib-dt-apriltags/blob/master/test/test.py
         # april tag detection
         
-        results = self.detector.detect(self.undistorted, estimate_tag_pose=True, camera_params=(self.cam_matrix[0,0], self.cam_matrix[1,1], self.cam_matrix[0,2], self.cam_matrix[1,2]), tag_size=0.065)
-
+        results = self.detector.detect(self.undistorted, camera_params=(self.cam_matrix[0,0], self.cam_matrix[1,1], self.cam_matrix[0,2], self.cam_matrix[1,2]), tag_size=0.065)
         try:
             r = results[0]
 
-            self.log(f"\napriltag ID: {r.tag_id}, \nlocation: {self.tags[str(r.tag_id)]['x']}, {self.tags[str(r.tag_id)]['y']}, {self.tags[str(r.tag_id)]['z']}, \nrotation: {self.tags[str(r.tag_id)]['yaw']}, {self.tags[str(r.tag_id)]['pitch']}, {self.tags[str(r.tag_id)]['roll']}\n")
-
-            return 1
+            return self.tags[str(r.tag_id)]
         except Exception as e:
             print(e)
 
-            return 0
+            return "lil bro is trippin"
         
     def readYamlFile(self,fname):
         """
