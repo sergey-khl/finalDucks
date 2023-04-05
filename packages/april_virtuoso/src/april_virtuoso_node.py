@@ -14,8 +14,6 @@ import yaml
 from lane_follow.srv import img
 
 
-NUM_MASK = [(90, 85, 100), (175, 255, 255)]
-
 class AprilVirtuosoNode(DTROS):
 
     def __init__(self, node_name):
@@ -23,6 +21,9 @@ class AprilVirtuosoNode(DTROS):
         super(AprilVirtuosoNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         self.veh = rospy.get_param("~veh")
 
+        self.pub_img = rospy.Publisher("/" + self.veh + "/output/image/undistorted/compressed",
+                                   CompressedImage,
+                                   queue_size=1)
        
         self.sub = rospy.Subscriber("/" + self.veh + "/camera_node/image/compressed",
                                     CompressedImage,
@@ -65,7 +66,9 @@ class AprilVirtuosoNode(DTROS):
         undistorted = cv2.undistort(img, self.cam_matrix, self.distort_coeff, None, self.new_cam_matrix)
         x, y, w, h = self.roi
         undistorted = undistorted[y:y+h, x:x+w]
+        undistorted = undistorted[:, 100:-100]
         self.undistorted = CompressedImage(format="jpeg", data=cv2.imencode('.jpg', undistorted)[1].tobytes())
+        self.pub_img.publish(self.undistorted)
 
         
     def maestro(self):

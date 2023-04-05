@@ -39,7 +39,10 @@ class AugmentedRealityNode(DTROS):
             "56": "S",
             "48": "R",
             "50": "L",
+            "38": "P",
         }
+
+        self.parking = ["207", "226", "228", "75"]
 
         # Initialize TurboJPEG decoder
         self.jpeg = TurboJPEG()
@@ -77,11 +80,14 @@ class AugmentedRealityNode(DTROS):
         # https://github.com/duckietown/lib-dt-apriltags/blob/master/test/test.py
         # april tag detection
         
-        results = self.detector.detect(self.undistorted, camera_params=(self.cam_matrix[0,0], self.cam_matrix[1,1], self.cam_matrix[0,2], self.cam_matrix[1,2]), tag_size=0.065)
+        results = self.detector.detect(self.undistorted, estimate_tag_pose=True, camera_params=(self.cam_matrix[0,0], self.cam_matrix[1,1], self.cam_matrix[0,2], self.cam_matrix[1,2]), tag_size=0.065)
         try:
-            r = results[0]
+            for r in results:
+                if str(r.tag_id) in self.parking:
+                    if r.pose_t[2] < 0.3:
+                        return "PARKED"
 
-            return self.tags[str(r.tag_id)]
+            return self.tags[str(results[0].tag_id)]
         except Exception as e:
             print(e)
 

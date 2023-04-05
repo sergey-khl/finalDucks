@@ -9,7 +9,7 @@ from duckietown.dtros import DTROS, NodeType
 from sensor_msgs.msg import CameraInfo, CompressedImage
 from std_msgs.msg import Float32, String, Bool
 from turbojpeg import TurboJPEG
-
+from geometry_msgs.msg import Point
 from duckietown_msgs.msg import WheelsCmdStamped, Twist2DStamped
 import tf.transformations as tft
 from nav_msgs.msg import Odometry
@@ -18,16 +18,18 @@ from nav_msgs.msg import Odometry
 # Define the HSV color range for road and stop mask
 ROAD_MASK = [(20, 60, 0), (50, 255, 255)]
 STOP_MASK = [(0, 120, 120), (15, 255, 255)]
+CROSS_MASK = [(95, 120, 110), (135, 255, 210)]
 
 # Turn pattern 
-#TURNS = ['S', 'S', 'L', 'R', 'S', 'R', 'L'] # starting at apriltag 3
 TURN_VALUES = {'S': 0, 'L': np.pi/2, 'R': -np.pi/2}
-#TURNS_RADIUS = [0, 0, 0.3, 0.12, 0, 0.12, 0.3]
 TURN_RADIUS = {"S": 0, "L": 0.3, "R": 0.12}
+PARK_RADIUS = {1: 0.35, 2: 0.1, 3: 0.4, 4: 0.12}
 STOP_RED = False
+STOP_BLUE = False
+STOP_BROKEN = False
 
 # Set debugging mode (change to True to enable)
-DEBUG = False
+DEBUG = True
 
 class LaneFollowNode(DTROS):
     def __init__(self, node_name):
@@ -36,11 +38,13 @@ class LaneFollowNode(DTROS):
         # Save node name and vehicle name
         self.node_name = node_name
         self.veh = rospy.get_param("~veh")
+        self.park = 1
 
         # Publishers & Subscribers
         self.pub = rospy.Publisher("/" + self.veh + "/output/image/mask/compressed",
                                    CompressedImage,
                                    queue_size=1)
+
         self.sub = rospy.Subscriber("/" + self.veh + "/camera_node/image/compressed",
                                     CompressedImage,
                                     self.callback,
@@ -50,7 +54,9 @@ class LaneFollowNode(DTROS):
         self.sub_turn = rospy.Subscriber("/" + self.veh + "/turn",
                                     String,
                                     self.cb_turn,
-                                    queue_size=1)   
+                                    queue_size=1)
+
+        self.sub_dist = rospy.Subscriber("/" + self.veh + "/duckiebot_distance_node/distance", Point, self.cb_dist, queue_size=1)   
 
         # Initialize distance subscriber and velocity publisher
         #self.sub_ml = rospy.Subscriber("/" + self.veh + "/augmented_reality_node/position", Point, self.cb_april, queue_size=1)
@@ -62,7 +68,7 @@ class LaneFollowNode(DTROS):
         self.jpeg = TurboJPEG()
         
 
-        
+        self.duck_gone = True
 
         # PID Variables
         self.proportional = None
@@ -92,16 +98,18 @@ class LaneFollowNode(DTROS):
                                            Odometry, 
                                            self.odom_callback)
                                            
-        self.subscriber = rospy.Subscriber(f'/{self.veh}/deadreckoning_node/odom', 
-                                           Odometry, 
-                                           self.odom_callback)
 
         # Initialize shutdown hook
         rospy.on_shutdown(self.hook)
 
 
-    def color_mask(self, img, mask, crop_width, pid=False, stopping=False, number=False):
-        global STOP_RED
+    def color_mask(self, img, mask, crop_width, pid=False, stopping=False, crossing=False, detect_duck=False):
+        global STOP_RED, STOP_BLUE, DEBUG
+        if crossing or stopping:
+            img = img[:, 200:-200, :]
+            
+
+            
         # Convert the cropped image to HSV color space
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -109,73 +117,94 @@ class LaneFollowNode(DTROS):
         mask = cv2.inRange(hsv, mask[0], mask[1])
         crop = cv2.bitwise_and(img, img, mask=mask)
 
-        if number:
-            # Define the structuring element for dilation
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-
-            # Erode the image
-            eroded_image = cv2.erode(crop, kernel, iterations=1)
-
-            # Dilate the eroded image
-            crop = cv2.dilate(eroded_image, kernel, iterations=2)
-
         # Find contours in the masked image
         contours_road, hierarchy = cv2.findContours(mask,
                                             cv2.RETR_EXTERNAL,
                                             cv2.CHAIN_APPROX_NONE)
-
-        # Find the largest contour
-        max_area = 20
-        max_idx = -1
-        for i in range(len(contours_road)):
-            area = cv2.contourArea(contours_road[i])
-            if area > max_area:
-                max_idx = i
-                max_area = area
-
-        # If a contour is found
-        if max_idx != -1:
-            # Calculate the centroid of the contour
-            M = cv2.moments(contours_road[max_idx])
+        
+        if self.latest_turn == "P" and pid:
+            moments = [cv2.moments(contour) for contour in contours_road]
             try:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-
-                # If using PID control, updat e the proportional term
-                if pid:
-                    # check x cord (inside lane problem)
-                    self.proportional = cx - int(crop_width / 2) + self.offset
-
-                # If checking for stopping condition or below the threshold, set STOP_RED
-                elif stopping:
-                    # print('stoping cond cy: ', cy, cx)
-                    if cx > 50:
-                        self.proportional_stopline = (cy/168)*0.12
-                    else: 
-                        self.proportional_stopline = None
-
-                    if cy >= 170 and cx in range(340, 645):
-                        STOP_RED = True
-
-
-                else:
-                    STOP_RED = False
-
-                # Draw the contour and centroid on the image (for debugging)
+                centroids = [[int(M['m10'] / M['m00']), int(M['m10'] / M['m00'])] for M in moments]
+                #print('first guess centroid = ', centroids)
+                cx, cy = np.mean(centroids, axis=0)
+                print('da mean is: ', cx, cy)
                 if DEBUG:
-                    cv2.drawContours(crop, contours_road, max_idx, (0, 255, 0), 3)
+                    #cv2.drawContours(crop, contours_road, max_idx, (0, 255, 0), 3)
                     cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
-            except:
-                pass
-
-        # If no contour is found, reset the flags
+                    if pid:
+                        self.pub.publish(CompressedImage(format="jpeg", data=cv2.imencode('.jpg', crop)[1].tobytes()))
+            except Exception as e:
+                print(e)
         else:
-            if pid:
-                self.proportional = None
+            # Find the largest contour
+            max_area = 20
+            max_idx = -1
+            for i in range(len(contours_road)):
+                area = cv2.contourArea(contours_road[i])
+                if area > max_area:
+                    max_idx = i
+                    max_area = area
 
-            elif stopping:
-                self.proportional_stopline = None
-                STOP_RED = False
+            # If a contour is found
+            if max_idx != -1:
+                # Calculate the centroid of the contour
+                M = cv2.moments(contours_road[max_idx])
+                try:
+                    cx = int(M['m10'] / M['m00'])
+                    cy = int(M['m01'] / M['m00'])
+
+                    # If using PID control, updat e the proportional term
+                    if pid:
+                        # check x cord (inside lane problem)
+                        self.proportional = cx - int(crop_width / 2) + self.offset
+
+                    # If checking for stopping condition or below the threshold, set STOP_RED
+                    elif stopping:
+                        #print('stoping cond cy: ', cy, cx)
+                        if cx > 50:
+                            self.proportional_stopline = (cy/168)*0.12
+                        else: 
+                            self.proportional_stopline = None
+
+                        if cy >= 150 and cx in range(100, 200):
+                            STOP_RED = True
+
+                    # If checking for stopping condition or below the threshold, set STOP_RED
+                    elif crossing:
+                        #print('crossing cond cy: ', cy, cx)
+                        if cx > 50:
+                            self.proportional_stopline = (cy/168)*0.12
+                        else: 
+                            self.proportional_stopline = None
+
+                        if cy >= 130 and cx in range(100, 200):
+                            STOP_BLUE = True
+
+
+                    if detect_duck:
+                        self.duck_gone = False
+
+
+                    # Draw the contour and centroid on the image (for debugging)
+                    if DEBUG:
+                        cv2.drawContours(crop, contours_road, max_idx, (0, 255, 0), 3)
+                        cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
+                except:
+                    pass
+
+            # If no contour is found, reset the flags
+            else:
+                if pid:
+                    self.proportional = None
+
+                elif stopping:
+                    self.proportional_stopline = None
+                    STOP_RED = False
+                    self.duck_gone = True
+                elif crossing:
+                    self.proportional_stopline = None
+                    STOP_BLUE = False
 
 
 
@@ -192,7 +221,10 @@ class LaneFollowNode(DTROS):
         self.color_mask(crop_road, ROAD_MASK, crop_width, pid=True)
 
         # Process the image for stopping condition using the STOP_MASK
-        self.color_mask(crop_road, STOP_MASK, crop_width, stopping=True)
+        self.color_mask(crop_road, STOP_MASK, crop_width, stopping=True, detect_duck=True)
+
+        # Process the image for ducks using the DUCK_MASK
+        self.color_mask(crop_road, CROSS_MASK, crop_width, crossing=True)
 
 
     def odom_callback(self, data):
@@ -212,6 +244,13 @@ class LaneFollowNode(DTROS):
         # Calculate displacement from the origin
         displacement = np.sqrt(x**2 + y**2 + z**2)
         self.displacement = displacement
+
+    def cb_dist(self, msg):        
+        global STOP_BROKEN
+        # If the z-value is less than 0.5, set stopping to True
+        if (msg.z < 0.5 and msg.z != 0):
+            STOP_BROKEN = True
+                
 
 
     def turn(self, r, target_angle):
@@ -267,7 +306,8 @@ class LaneFollowNode(DTROS):
             self.twist.omega = P + D
 
             if DEBUG:
-                print(self.proportional, P, D, self.twist.omega, self.twist.v)
+                #print(self.proportional, P, D, self.twist.omega, self.twist.v)
+                pass
 
         if self.proportional_stopline is None:
             self.twist.v = self.velocity
@@ -279,14 +319,13 @@ class LaneFollowNode(DTROS):
 
 
     def traverse_town(self):
-        global STOP_RED
+        global STOP_RED, STOP_BLUE, STOP_BROKEN
         rate = rospy.Rate(8)  # 8hz
 
         while not rospy.is_shutdown():
             
-            
             # Continue driving until a stop sign (red) or a number sign (blue) is detected
-            while not STOP_RED:
+            while not STOP_RED and not STOP_BLUE and not STOP_BROKEN:
                 self.drive()
                 rate.sleep()
 
@@ -294,23 +333,55 @@ class LaneFollowNode(DTROS):
 
             # Stop the Duckiebot once a sign is detected
             before_stop_red = STOP_RED
-            self.move_robust(speed=0 ,seconds=2)
-            STOP_RED = before_stop_red
+            if before_stop_red:
+                self.move_robust(speed=0 ,seconds=2)
+                STOP_RED = before_stop_red
 
-            print('STOP_RED', STOP_RED)
+                print('STOP_RED', STOP_RED)
+            
+            before_stop_blue = STOP_BLUE
+            if before_stop_blue:
+                self.move_robust(speed=0 ,seconds=2)
+
+                print('STOP_BLUE', before_stop_blue)
+
+            before_stop_broken = STOP_BROKEN
+            if before_stop_broken:
+                self.move_robust(speed=0 ,seconds=2)
+
+                print('STOP_BROKEN', before_stop_broken)
+                
+
             print(latest_turn)
 
             # If a stop line is detected
             if STOP_RED:
-                turning_angle = TURN_VALUES[latest_turn]
+                if latest_turn != "P":
+                    turning_angle = TURN_VALUES[latest_turn]
+                else:
+                    if self.park == 1 or self.park == 2:
+                        turning_angle = TURN_VALUES["L"]
+                    elif self.park == 3 or self.park == 4:
+                        turning_angle = TURN_VALUES["R"]
+                
                 if turning_angle == 0:
                     self.move_robust(speed=0.3 ,seconds=2.5)
                     STOP_RED = False
 
                 else:
-                    self.turn(TURN_RADIUS[latest_turn], turning_angle)
+                    if latest_turn != "P":
+                        self.turn(TURN_RADIUS[latest_turn], turning_angle)
+                    else:
+                        self.turn(PARK_RADIUS[self.park], turning_angle)
 
                     STOP_RED = False
+            elif STOP_BLUE and self.duck_gone:
+                self.move_robust(speed=0.3 ,seconds=1)
+                STOP_BLUE = False
+            elif STOP_BROKEN:
+                #TODO: go around broken bot
+                STOP_BROKEN = False
+
 
 
     def move_robust(self, speed, seconds):
@@ -335,6 +406,9 @@ class LaneFollowNode(DTROS):
 
     def cb_turn(self, turn):
         print('latest, ', turn.data)
+        if turn.data == "PARKED":
+            self.log('parked!!!')
+            rospy.signal_shutdown('done!')
         self.latest_turn = turn.data
 
     def hook(self):
