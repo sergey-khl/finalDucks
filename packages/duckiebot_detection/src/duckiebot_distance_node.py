@@ -153,3 +153,4 @@ class DuckiebotDistanceNode(DTROS):
 if __name__ == "__main__":
     duckiebot_distance_node = DuckiebotDistanceNode(node_name="duckiebot_distance_node")
     rospy.spin()
+    rospy.signal_shutdown('done found distance')

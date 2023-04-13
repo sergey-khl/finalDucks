@@ -76,8 +76,11 @@ class AprilVirtuosoNode(DTROS):
         if self.undistorted is not None:
             latest_turn = self.get_april(self.undistorted).turn.data
             if latest_turn != 'lil bro is trippin':
+                
                 self.latest_turn = latest_turn
                 self.pub.publish(String(data=self.latest_turn))
+                if latest_turn == "PARKED":
+                    rospy.signal_shutdown('parked')
 
         
     def readYamlFile(self,fname):
