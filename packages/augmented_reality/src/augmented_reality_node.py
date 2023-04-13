@@ -18,6 +18,7 @@ from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 
 from tf import transformations as tr
 
+
 class AugmentedRealityNode(DTROS):
 
     def __init__(self, node_name):
@@ -84,10 +85,10 @@ class AugmentedRealityNode(DTROS):
         try:
             for r in results:
                 if str(r.tag_id) in self.parking:
-                    if r.pose_t[2] < 0.3:
-                        return "PARKED"
+                    return f'id:{r.tag_id} x:{r.pose_t[0]} y:{r.pose_t[1]} z:{r.pose_t[2]}'
 
             return self.tags[str(results[0].tag_id)]
+        
         except Exception as e:
             print(e)
 

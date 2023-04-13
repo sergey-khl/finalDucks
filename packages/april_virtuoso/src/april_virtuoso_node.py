@@ -58,6 +58,7 @@ class AprilVirtuosoNode(DTROS):
         
         self.latest_turn = "S"
 
+
     def callback(self, msg):
         # decode the received message to an image
         img = self.jpeg.decode(msg.data)
