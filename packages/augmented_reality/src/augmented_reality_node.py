@@ -39,6 +39,7 @@ class AugmentedRealityNode(DTROS):
             "56": "S",
             "48": "R",
             "50": "L",
+            "163": "D",
             "38": "P",
         }
 
@@ -115,3 +116,4 @@ if __name__ == '__main__':
     node = AugmentedRealityNode(node_name='augmented_reality_node')
 
     rospy.spin()
+    rospy.signal_shutdown('done found parked')

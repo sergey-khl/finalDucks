@@ -129,3 +129,4 @@ class DuckiebotDetectionNode(DTROS):
 if __name__ == "__main__":
     duckiebot_detection_node = DuckiebotDetectionNode("duckiebot_detection")
     rospy.spin()
+    rospy.signal_shutdown('done detection')
