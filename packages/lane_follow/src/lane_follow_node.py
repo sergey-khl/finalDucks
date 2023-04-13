@@ -32,7 +32,7 @@ STOP_BLUE = False
 STOP_BROKEN = False
 
 # Set debugging mode (change to True to enable)
-DEBUG = True
+DEBUG = False
 
 class LaneFollowNode(DTROS):
     def __init__(self, node_name):
@@ -91,9 +91,6 @@ class LaneFollowNode(DTROS):
         self.latest_turn = "S"
         self.stopped_for_broken = False
 
-        # number area 
-        self.last_num_area = 0
-
         # Robot Pose Variables
         self.displacement = 0
         self.orientation = 0
@@ -108,10 +105,8 @@ class LaneFollowNode(DTROS):
 
     def color_mask(self, img, mask, crop_width, pid=False, stopping=False, crossing=False, detect_duck=False):
         global STOP_RED, STOP_BLUE, DEBUG
-
         if crossing or stopping:
             img = img[:, 200:-200, :]
-            
         # Convert the cropped image to HSV color space
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -124,7 +119,6 @@ class LaneFollowNode(DTROS):
                                             cv2.RETR_EXTERNAL,
                                             cv2.CHAIN_APPROX_NONE)
         
-
         # Find the largest contour
         max_area = 20
         max_idx = -1
@@ -150,32 +144,30 @@ class LaneFollowNode(DTROS):
                 # If checking for stopping condition or below the threshold, set STOP_RED
                 elif stopping:
                     #print('stoping cond cy: ', cy, cx)
-                    if cx > 50:
-                        self.proportional_stopline = (cy/168)*0.12
-                    else: 
-                        self.proportional_stopline = None
+                    #self.proportional_stopline = (cy/168)*0.15
 
                     if cy >= 140:
                         STOP_RED = True
 
-                # If checking for stopping condition or below the threshold, set STOP_RED
+                # If checking for stopping condition or below the  and cx in range(100, 200)threshold, set STOP_RED
                 elif crossing:
                     #print('crossing cond cy: ', cy, cx)
-                    if cx > 50:
-                        self.proportional_stopline = (cy/168)*0.12
-                    else: 
-                        self.proportional_stopline = None
+                    #self.proportional_stopline = (cy/168)*0.12
 
                     if cy >= 140:
                         STOP_BLUE = True
 
+
                 if detect_duck:
                     self.duck_gone = False
+
 
                 # Draw the contour and centroid on the image (for debugging)
                 if DEBUG:
                     cv2.drawContours(crop, contours_road, max_idx, (0, 255, 0), 3)
                     cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
+                    if detect_duck:
+                        self.pub.publish(CompressedImage(format="jpeg", data=cv2.imencode('.jpg', crop)[1].tobytes()))
             except:
                 pass
 
@@ -188,7 +180,6 @@ class LaneFollowNode(DTROS):
                 self.proportional_stopline = None
                 STOP_RED = False
                 self.duck_gone = True
-                
             elif crossing:
                 self.proportional_stopline = None
                 STOP_BLUE = False
@@ -261,15 +252,9 @@ class LaneFollowNode(DTROS):
             if r == TURN_RADIUS["L"]:
                 angular_speed = 3.2 * np.sign(orientation_error)
                 linear_speed = 0.3
-
-            elif r == 0.12:
-                angular_speed = 4 * np.sign(orientation_error)
+            else:
+                angular_speed = 3.6 * np.sign(orientation_error)
                 linear_speed = 0.32
-            
-            elif r == 0:
-                angular_speed = 4 * np.sign(orientation_error)
-                print('angular_speed: ', angular_speed)
-                linear_speed = 0
 
             # print('linear_speed', linear_speed)
 
@@ -325,11 +310,6 @@ class LaneFollowNode(DTROS):
 
             latest_turn = self.latest_turn
 
-            if latest_turn == "PARKED":
-                self.log('parked!!!')
-                self.move_robust(0, 3)
-                rospy.signal_shutdown('done lane follwing')
-
             # Stop the Duckiebot once a sign is detected
             before_stop_red = STOP_RED
             if before_stop_red and latest_turn != "D":
@@ -364,7 +344,6 @@ class LaneFollowNode(DTROS):
                 else:
                     turning_angle = TURN_VALUES[latest_turn]
 
-                
                     if turning_angle == 0: # go straight 
                         self.move_robust(speed=0.3 ,seconds=2.5)
                         STOP_RED = False
@@ -415,20 +394,7 @@ class LaneFollowNode(DTROS):
                 if z < stopping_threshold:
                     parked = True
 
-                self.twist.v, self.twist.omega = self.pril_tag_PID(x, y, z)
-
-
-    def move_distance_robust(self, d, threshold=0.05):
-        start = current = self.displacement 
-        distance = current - start
-
-        while abs(distance - d) > threshold:
-            print(abs(self.displacement - d))
-
-            self.twist.v = 0.3
-            self.twist.omega = 0
-
-            self.vel_pub.publish(self.twist)
+                self.twist.v, self.twist.omega = self.april_tag_PID(x, y, z)
 
 
     def move_robust(self, speed, seconds):
