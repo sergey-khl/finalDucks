@@ -22,7 +22,9 @@ ROAD_MASK = [(20, 60, 0), (50, 255, 255)]
 STOP_MASK = [(0, 55, 140), (20, 255, 255)]
 CROSS_MASK = [(95, 120, 110), (135, 255, 210)]
 
-PARKING_LOT = {'207':1, '226':2, '228':3, '75':4}
+# Parking lot values 
+PARKING_LOT = {1:'207', 2:'226', 3:'228', 4:'75'}
+ENTRANCE = '222' # need to change 
 
 # Turn pattern 
 TURN_VALUES = {'S': 0, 'L': np.pi/2, 'R': -np.pi/2}
@@ -356,14 +358,48 @@ class LaneFollowNode(DTROS):
             elif STOP_BLUE and self.duck_gone:
                 self.move_robust(speed=self.velocity ,seconds=2)
                 STOP_BLUE = False
+                self.duck_gone = False
 
-            elif STOP_BROKEN:
-                #TODO: go around broken bot
+            elif STOP_BROKEN and self.stopped_for_broken:
                 STOP_BROKEN = False
+                self.offset = -150
+                #start = self.displacement.copy()
+                
+                rate = rospy.Rate(8)
+                # while abs(self.displacement - start) < 0.25:
+                #     print(start, self.displacement)
+                    # # Publish the twist message multiple times to ensure the robot stops
+                for i in range(int(32)):
+                    self.drive()
+                    rate.sleep()
+
+                STOP_BROKEN = False
+                
+                self.offset = 200
+
+                # for i in range(int(20)):
+                #     self.drive()
+                #     rate.sleep()
+
+                #self.P = 0.035
 
 
-    def april_tag_PID(self, x, y, z):
-        pass
+    def april_tag_PID(self, tag_id, threshold):
+        made_it = False
+
+        while not made_it:
+            stall_id, x, y, z = self.extract_parking_info()
+
+            if tag_id == stall_id:
+                print('x: ', x, 'y: ', y, 'z: ', z)
+
+                if z < threshold:
+                    made_it = True
+
+                # need to change these 
+                self.twist.v, self.twist.omega = 0, 0
+                self.vel_pub.publish(self.twist)
+            
 
     def extract_parking_info(self):
         pattern = r'[-+]?\d+'
@@ -372,29 +408,23 @@ class LaneFollowNode(DTROS):
 
 
     def parking_lot(self):
-        stopping_threshold = 0.1
+        stopping_threshold_stall = 0.1
+        stopping_threshold_entrance = 0.4
 
-        # move to middle of parking lot 
-        self.move_distance_robust(0.4)
+        # move to middle of parking lot
+        self.april_tag_PID('222', stopping_threshold_entrance)
 
-        # turn to face correct side 
-        if self.park in [1, 2]:
+        # turn to correct direction
+        if self.park in [1,2]:
             self.turn(0, np.pi/2)
-
         else:
             self.turn(0, -1*np.pi/2)
+        
+        # ok lets park!
+        desired_id = PARKING_LOT[self.park]
+        self.april_tag_PID(desired_id, stopping_threshold_stall)
 
-        parked = False
-        while not parked:
-            stall_id, x, y, z = self.extract_parking_info()
-
-            if PARKING_LOT[stall_id] == self.park:
-                print('x: ', x, 'y: ', y, 'z: ', z)
-
-                if z < stopping_threshold:
-                    parked = True
-
-                self.twist.v, self.twist.omega = self.april_tag_PID(x, y, z)
+        rospy.signal_shutdown('Parked!')
 
 
     def move_robust(self, speed, seconds):
@@ -433,5 +463,8 @@ class LaneFollowNode(DTROS):
 
 
 if __name__ == "__main__":
-    node = LaneFollowNode("lanefollow_node")
-    node.traverse_town()
+    try:
+        node = LaneFollowNode("lanefollow_node")
+        node.traverse_town()
+    except rospy.ROSInterruptException:
+        pass

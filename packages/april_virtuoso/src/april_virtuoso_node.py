@@ -79,8 +79,6 @@ class AprilVirtuosoNode(DTROS):
                 
                 self.latest_turn = latest_turn
                 self.pub.publish(String(data=self.latest_turn))
-                if latest_turn == "PARKED":
-                    rospy.signal_shutdown('parked')
 
         
     def readYamlFile(self,fname):
