@@ -15,7 +15,7 @@ dt-launchfile-init
 # launching app
 dt-exec roslaunch augmented_reality augmented_reality_node.launch veh:="$VEHICLE_NAME"
 dt-exec roslaunch deadreckoning deadreckoning_node.launch veh:="$VEHICLE_NAME"
-dt-exec roslaunch lane_follow lane_follow_node.launch veh:="$VEHICLE_NAME"
+dt-exec roslaunch lane_follow lane_follow_node.launch veh:="$VEHICLE_NAME" park:="4"
 dt-exec roslaunch april_virtuoso april_virtuoso_node.launch veh:="$VEHICLE_NAME"
 dt-exec roslaunch duckiebot_detection duckiebot_detection_node.launch
 

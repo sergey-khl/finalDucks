@@ -24,7 +24,7 @@ CROSS_MASK = [(95, 120, 110), (135, 255, 210)]
 
 # Parking lot values 
 PARKING_LOT = {1:'207', 2:'226', 3:'228', 4:'75'}
-ENTRANCE = '222' # need to change 
+ENTRANCE = '227' # need to change 
 
 # Turn pattern 
 TURN_VALUES = {'S': 0, 'L': np.pi/2, 'R': -np.pi/2}
@@ -43,7 +43,8 @@ class LaneFollowNode(DTROS):
         # Save node name and vehicle name
         self.node_name = node_name
         self.veh = rospy.get_param("~veh")
-        self.park = 1
+        self.park = int(rospy.get_param("~park"))
+        print(self.park)
         self.parking_info = None
 
         # Publishers & Subscribers
@@ -159,7 +160,6 @@ class LaneFollowNode(DTROS):
                     if cy >= 140:
                         STOP_BLUE = True
 
-
                 if detect_duck:
                     self.duck_gone = False
 
@@ -243,7 +243,7 @@ class LaneFollowNode(DTROS):
         # Create a rospy.Rate object to maintain the loop rate at 8 Hz
         rate = rospy.Rate(8)
 
-        while abs(orientation_error) > 0.2:
+        while abs(orientation_error) > 0.3:
             print('orientation_error: ', np.rad2deg(orientation_error))
 
             orientation_error_raw = target_orientation - self.orientation
@@ -254,6 +254,16 @@ class LaneFollowNode(DTROS):
             if r == TURN_RADIUS["L"]:
                 angular_speed = 3.2 * np.sign(orientation_error)
                 linear_speed = 0.3
+
+            elif r == 0: 
+                if self.park in [3, 4]:
+                    
+                    angular_speed = -1*abs(5.1 * np.sign(orientation_error))
+                    linear_speed = 0
+                else:
+                    angular_speed = abs(5.1 * np.sign(orientation_error))
+                    linear_speed = 0
+
             else:
                 angular_speed = 3.6 * np.sign(orientation_error)
                 linear_speed = 0.32
@@ -336,14 +346,22 @@ class LaneFollowNode(DTROS):
             print(latest_turn)
 
             # If a stop line is detected
-            if STOP_RED:
+            if STOP_RED and latest_turn != "D":
                 # we are about to enter the parking lot
                 if latest_turn == "P":
                     print('Time to park!')
                     self.parking_lot()
                 
+                elif latest_turn[0] == 'i':
+                    stall_id, x, y, z = self.extract_parking_info()
+                    if z > 1 and str(int(stall_id)) == ENTRANCE:
+                        print('Time to park!')
+                        self.parking_lot()
+                        continue
+                
                 # at a regualr intersection about to make a turn
                 else:
+                    print(latest_turn)
                     turning_angle = TURN_VALUES[latest_turn]
 
                     if turning_angle == 0: # go straight 
@@ -387,32 +405,50 @@ class LaneFollowNode(DTROS):
     def april_tag_PID(self, tag_id, threshold):
         made_it = False
 
-        while not made_it:
-            stall_id, x, y, z = self.extract_parking_info()
+        rate = rospy.Rate(8)
 
-            if tag_id == stall_id:
+        while not made_it:
+            if self.parking_info == None:
+                print('parking_info is none')
+                continue
+            try:
+                stall_id, x, y, z = self.extract_parking_info()
+            except:
+                print('too many vars')
+
+            if tag_id == str(int(stall_id)):
                 print('x: ', x, 'y: ', y, 'z: ', z)
 
                 if z < threshold:
                     made_it = True
 
                 # need to change these 
-                self.twist.v, self.twist.omega = 0, 0
+                self.twist.v, self.twist.omega = z*0.25+0.1, 0 #-1*(190-x)*1/10 # is it x or y? mul by -1?
                 self.vel_pub.publish(self.twist)
-            
+
+            rate.sleep()
+
 
     def extract_parking_info(self):
-        pattern = r'[-+]?\d+'
-        numbers = re.findall(pattern, self.parking_info)
-        return [int(num) for num in numbers]
+        pattern = r'-?\d+(\.\d+)?'
+
+        matches = []
+        for match in re.finditer(pattern, self.parking_info):
+            number = float(match[0])
+            matches.append(number if number.is_integer() else number)
+
+        return matches
 
 
     def parking_lot(self):
-        stopping_threshold_stall = 0.1
-        stopping_threshold_entrance = 0.4
+        stopping_threshold_stall = 0.3
+        stopping_threshold_entrance = 0.5
 
         # move to middle of parking lot
-        self.april_tag_PID('222', stopping_threshold_entrance)
+        self.april_tag_PID(ENTRANCE, stopping_threshold_entrance)
+
+        print('made it to middle')
+        self.move_robust(speed=0 ,seconds=2)
 
         # turn to correct direction
         if self.park in [1,2]:

@@ -44,7 +44,7 @@ class AugmentedRealityNode(DTROS):
             "38": "P",
         }
 
-        self.parking = ["207", "226", "228", "75"]
+        self.parking = ["207", "226", "228", "75", '227']
 
         # Initialize TurboJPEG decoder
         self.jpeg = TurboJPEG()
@@ -67,7 +67,6 @@ class AugmentedRealityNode(DTROS):
         )
 
 
-
     def srvGetApril(self, req):
         undistorted = self.jpeg.decode(req.img.data)
         self.undistorted = cv2.cvtColor(undistorted, cv2.COLOR_BGR2GRAY)
@@ -85,8 +84,8 @@ class AugmentedRealityNode(DTROS):
         results = self.detector.detect(self.undistorted, estimate_tag_pose=True, camera_params=(self.cam_matrix[0,0], self.cam_matrix[1,1], self.cam_matrix[0,2], self.cam_matrix[1,2]), tag_size=0.065)
         try:
             for r in results:
-                if str(r.tag_id) in self.parking:
-                    return f'id:{r.tag_id} x:{r.pose_t[0]} y:{r.pose_t[1]} z:{r.pose_t[2]}'
+                if str(r.tag_id) in self.parking and r.tag_id != 38:
+                    return f'id:{r.tag_id} x:{r.center[0]} y:{r.center[1]} z:{r.pose_t[2]}'
 
             return self.tags[str(results[0].tag_id)]
         
@@ -94,6 +93,7 @@ class AugmentedRealityNode(DTROS):
             print(e)
 
             return "lil bro is trippin"
+        
         
     def readYamlFile(self,fname):
         """
