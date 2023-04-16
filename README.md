@@ -1,4 +1,4 @@
-# 🤖 CMPUT 412: Exercise 5 - Machine Learning for Robotics 🤖
+# 🤖 CMPUT 412: final project 🤖
 
 Going around duckietown and detecting numbers and apriltags until all are detected.
 
@@ -14,6 +14,9 @@ Going around duckietown and detecting numbers and apriltags until all are detect
     ```   
 
 ## References 🫡
-NONE!
 
-## Made using: [this template](https://github.com/XZPshaw/CMPUT412503_exercise4)
+- [lane following](https://eclass.srv.ualberta.ca/course/view.php?id=85053)
+- [april tag detection](https://github.com/duckietown/lib-dt-apriltags/blob/master/test/test.py)
+- [yaml load](https://docs.duckietown.org/daffy/duckietown-classical-robotics/out/cra_perception.html)
+
+## Made using: [this template](https://github.com/wagonhelm/cmput412_exercise3)
